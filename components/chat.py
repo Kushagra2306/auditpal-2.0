@@ -34,11 +34,13 @@ _CITATION_CSS = """
     left: 50%;
     transform: translateX(-50%);
     width: max-content;
-    max-width: 360px;
-    min-width: 220px;
+    max-width: 520px;
+    min-width: 260px;
+    max-height: 340px;
+    overflow-y: auto;
     background: #1f1f1f;
     color: #f1f3f4;
-    padding: 10px 12px;
+    padding: 12px 14px;
     border-radius: 6px;
     font-size: 12.5px;
     font-weight: 400;
@@ -46,7 +48,7 @@ _CITATION_CSS = """
     z-index: 999999;
     box-shadow: 0 6px 20px rgba(0,0,0,0.45);
     white-space: normal;
-    line-height: 1.45;
+    line-height: 1.5;
     transition: opacity 0.12s, visibility 0.12s;
     user-select: text;
     cursor: text;
@@ -94,9 +96,9 @@ def _render_assistant_message(content: str, references: List[dict]):
         if not ref:
             return f"[{n}]"
         title = html.escape(ref.get("source_title") or "Source")
-        excerpt = ref.get("cited_text") or ""
+        excerpt = ref.get("expanded_text") or ref.get("cited_text") or ""
         if excerpt:
-            body_html = html.escape(excerpt[:400]).replace("\n", "<br>")
+            body_html = html.escape(excerpt[:1500]).replace("\n", "<br>")
             body = f'<span class="cite-tt-text">{body_html}</span>'
         else:
             body = '<span class="cite-tt-empty">(no excerpt extracted)</span>'
@@ -183,7 +185,7 @@ def _render_citations(references: List[dict], on_view_source: Callable, key_pref
         for r in refs:
             n = r.get("citation_number")
             title = r.get("source_title") or "Source"
-            cited = r.get("cited_text") or ""
+            cited = r.get("expanded_text") or r.get("cited_text") or ""
 
             st.markdown(f"**[{n}] {title}**")
             if cited:

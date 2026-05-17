@@ -194,6 +194,7 @@ class NotebookService:
         notebook_id: str,
         source_id: str,
         cited_text: str | None = None,
+        context_chars: int = 200,
     ) -> dict:
         """Fetch the full indexed text of a source for citation auditing.
 
@@ -207,7 +208,9 @@ class NotebookService:
                 ft = await client.sources.get_fulltext(notebook_id, source_id)
                 contexts = []
                 if cited_text:
-                    for ctx, pos in ft.find_citation_context(cited_text):
+                    for ctx, pos in ft.find_citation_context(
+                        cited_text, context_chars=context_chars
+                    ):
                         contexts.append({"context": ctx, "position": pos})
                 return {
                     "title": ft.title,
@@ -216,3 +219,60 @@ class NotebookService:
                     "contexts": contexts,
                 }
         return self._run_async(_get())
+
+    def expand_references(
+        self,
+        notebook_id: str,
+        references: List[dict],
+        context_chars: int = 450,
+        max_sources: int = 15,
+    ) -> List[dict]:
+        """Enrich references with an extended cited chunk for hover tooltips.
+
+        NotebookLM's chat API returns only a tiny excerpt per citation. This
+        fetches each cited source's indexed text once and sets
+        ``ref["expanded_text"]`` to the cited passage plus surrounding
+        context, so the inline citation tooltip can show the larger chunk
+        the way NotebookLM's hover card does. Best-effort: on any failure a
+        reference simply keeps its short ``cited_text``.
+        """
+        if not references:
+            return references
+
+        async def _expand():
+            from notebooklm import NotebookLMClient
+            async with await NotebookLMClient.from_storage() as client:
+                fulltext_cache: dict[str, object] = {}
+                processed_sources = 0
+                for ref in references:
+                    sid = ref.get("source_id")
+                    cited = ref.get("cited_text")
+                    if not sid or not cited:
+                        continue
+                    if sid not in fulltext_cache:
+                        if processed_sources >= max_sources:
+                            continue
+                        processed_sources += 1
+                        try:
+                            fulltext_cache[sid] = await client.sources.get_fulltext(
+                                notebook_id, sid
+                            )
+                        except Exception:
+                            fulltext_cache[sid] = None
+                    ft = fulltext_cache.get(sid)
+                    if ft is None:
+                        continue
+                    try:
+                        matches = ft.find_citation_context(
+                            cited, context_chars=context_chars
+                        )
+                    except Exception:
+                        matches = []
+                    if matches:
+                        ref["expanded_text"] = matches[0][0].strip()
+            return references
+
+        try:
+            return self._run_async(_expand())
+        except Exception:
+            return references

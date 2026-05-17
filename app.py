@@ -210,6 +210,9 @@ def render_main_app(service: NotebookService, settings):
                 ref["source_title"] = sources_by_id.get(
                     ref["source_id"], "Unknown source"
                 )
+            refs = service.expand_references(
+                st.session_state["current_notebook_id"], refs
+            )
             return {"answer": answer, "references": refs}
 
         def on_clear():
