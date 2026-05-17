@@ -113,10 +113,12 @@ class NotebookService:
         notebook_id: str,
         question: str,
         conversation_id: str | None = None,
+        history: List[tuple[str, str]] | None = None,
     ) -> tuple[str, str | None, List[dict]]:
         """Ask a question about the sources.
 
-        Pass conversation_id from a previous call to continue the same
+        Pass conversation_id from a previous call together with history
+        (oldest-first (question, answer) pairs) to continue the same
         conversation so NotebookLM has prior turns as context.
 
         Returns:
@@ -126,6 +128,15 @@ class NotebookService:
         async def _ask():
             from notebooklm import NotebookLMClient
             async with await NotebookLMClient.from_storage() as client:
+                # A fresh client is created per call, so its in-memory
+                # conversation cache is empty. NotebookLM's ask() builds the
+                # prior-turns payload solely from that cache, so reseed it
+                # from the app's transcript before continuing a conversation.
+                if conversation_id and history:
+                    for turn_number, (prev_q, prev_a) in enumerate(history, start=1):
+                        client._core.cache_conversation_turn(
+                            conversation_id, prev_q, prev_a, turn_number
+                        )
                 result = await client.chat.ask(
                     notebook_id, question, conversation_id=conversation_id
                 )

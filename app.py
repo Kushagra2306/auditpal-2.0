@@ -40,6 +40,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+def _conversation_history(messages):
+    """Reconstruct oldest-first (question, answer) pairs from the transcript.
+
+    A trailing user message with no answer (the question currently being
+    asked) and any failed turns are excluded so they don't poison context.
+    """
+    pairs = []
+    pending_q = None
+    for msg in messages:
+        if msg["role"] == "user":
+            pending_q = msg["content"]
+        elif msg["role"] == "assistant" and pending_q is not None:
+            answer = msg["content"]
+            if not answer.startswith("❌ Error:"):
+                pairs.append((pending_q, answer))
+            pending_q = None
+    return pairs
+
+
 def init_session_state():
     """Initialize session state variables."""
     defaults = {
@@ -175,6 +194,7 @@ def render_main_app(service: NotebookService, settings):
                 st.session_state["current_notebook_id"],
                 message,
                 conversation_id=st.session_state.get("current_conversation_id"),
+                history=_conversation_history(st.session_state["messages"]),
             )
             st.session_state["current_conversation_id"] = conv_id
 
