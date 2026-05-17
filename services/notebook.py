@@ -40,9 +40,19 @@ class NotebookService:
         return loop.run_until_complete(coro)
     
     def is_authenticated(self) -> bool:
-        """Check if NotebookLM is authenticated."""
-        storage_path = Path.home() / ".notebooklm" / "storage_state.json"
-        return storage_path.exists()
+        """Check if NotebookLM is authenticated.
+
+        Resolve the credentials path via the library itself so this check
+        matches wherever ``notebooklm login`` actually saved them (newer
+        versions use profile-based paths like
+        ``~/.notebooklm/profiles/default/storage_state.json``).
+        """
+        try:
+            from notebooklm.paths import get_storage_path
+            return get_storage_path().exists()
+        except Exception:
+            legacy = Path.home() / ".notebooklm" / "storage_state.json"
+            return legacy.exists()
     
     def list_notebooks(self) -> List[dict]:
         """List all notebooks."""
