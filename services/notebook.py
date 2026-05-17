@@ -184,3 +184,31 @@ class NotebookService:
                 ]
                 return result.answer, resolved_conv_id, references
         return self._run_async(_ask())
+
+    def get_source_fulltext(
+        self,
+        notebook_id: str,
+        source_id: str,
+        cited_text: str | None = None,
+    ) -> dict:
+        """Fetch the full indexed text of a source for citation auditing.
+
+        Returns a dict with the source title, full content, char count, and
+        (when cited_text is given) the located passages with surrounding
+        context so the exact cited chunk can be shown in the source.
+        """
+        async def _get():
+            from notebooklm import NotebookLMClient
+            async with await NotebookLMClient.from_storage() as client:
+                ft = await client.sources.get_fulltext(notebook_id, source_id)
+                contexts = []
+                if cited_text:
+                    for ctx, pos in ft.find_citation_context(cited_text):
+                        contexts.append({"context": ctx, "position": pos})
+                return {
+                    "title": ft.title,
+                    "content": ft.content,
+                    "char_count": ft.char_count,
+                    "contexts": contexts,
+                }
+        return self._run_async(_get())

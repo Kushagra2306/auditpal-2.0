@@ -216,6 +216,17 @@ def render_main_app(service: NotebookService, settings):
             st.session_state["messages"] = []
             st.session_state["current_conversation_id"] = None
 
+        def on_view_source(source_id, cited_text):
+            cache = st.session_state.setdefault("_source_cache", {})
+            key = (source_id, cited_text or "")
+            if key not in cache:
+                cache[key] = service.get_source_fulltext(
+                    st.session_state["current_notebook_id"],
+                    source_id,
+                    cited_text,
+                )
+            return cache[key]
+
         def on_export(format):
             notebook_title = "AuditPal Chat"
             for nb in st.session_state["notebooks"]:
@@ -238,6 +249,7 @@ def render_main_app(service: NotebookService, settings):
             on_send=on_send,
             on_clear=on_clear,
             on_export=on_export,
+            on_view_source=on_view_source,
             disabled=not has_sources
         )
 

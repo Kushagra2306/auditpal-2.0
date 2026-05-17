@@ -115,11 +115,104 @@ def _render_assistant_message(content: str, references: List[dict]):
     st.markdown(enhanced, unsafe_allow_html=True)
 
 
+def _highlight(context: str, cited_text: str | None) -> str:
+    """Escape a context block and visually mark the cited passage in it."""
+    esc = html.escape(context)
+    if cited_text:
+        full = html.escape(cited_text)
+        prefix = html.escape(cited_text[:40])
+        if full and full in esc:
+            esc = esc.replace(full, f"<mark>{full}</mark>", 1)
+        elif prefix and prefix in esc:
+            esc = esc.replace(prefix, f"<mark>{prefix}</mark>", 1)
+    return (
+        '<div style="white-space:pre-wrap;line-height:1.55;font-size:13.5px;'
+        'background:#fafafa;padding:12px;border-radius:6px;'
+        f'border:1px solid #e6e6e6">{esc}</div>'
+    )
+
+
+@st.dialog("📄 Source — citation audit", width="large")
+def _source_dialog(req: dict, on_view_source: Callable):
+    """Modal showing the cited passage highlighted within the full source."""
+    with st.spinner("Loading source…"):
+        try:
+            data = on_view_source(req["source_id"], req.get("cited_text"))
+        except Exception as e:
+            st.error(f"Could not load source: {e}")
+            return
+
+    st.markdown(f"**{data.get('title') or 'Source'}**")
+    st.caption(
+        f"Citation [{req['n']}] · {data.get('char_count', 0):,} characters indexed"
+    )
+
+    contexts = data.get("contexts") or []
+    if contexts:
+        st.markdown("**Cited passage in context:**")
+        for i, c in enumerate(contexts):
+            st.markdown(_highlight(c["context"], req.get("cited_text")),
+                        unsafe_allow_html=True)
+            if i < len(contexts) - 1:
+                st.divider()
+    elif req.get("cited_text"):
+        st.info(
+            "Couldn't locate the exact passage in the indexed text "
+            "(NotebookLM may have reformatted or truncated it). "
+            "The full source is below."
+        )
+
+    with st.expander("📄 Full source text", expanded=not contexts):
+        st.text_area(
+            "Full text",
+            data.get("content") or "(no text content available)",
+            height=420,
+            disabled=True,
+            label_visibility="collapsed",
+            key=f"ft_{req['source_id']}_{req['n']}",
+        )
+
+
+def _render_citations(references: List[dict], on_view_source: Callable, key_prefix: str):
+    """Render an auditable list of citations with a source viewer per entry."""
+    refs = [r for r in references if r.get("source_id")]
+    if not refs:
+        return
+
+    with st.expander(f"📚 Sources & citations ({len(refs)}) — click to audit"):
+        for r in refs:
+            n = r.get("citation_number")
+            title = r.get("source_title") or "Source"
+            cited = r.get("cited_text") or ""
+
+            st.markdown(f"**[{n}] {title}**")
+            if cited:
+                st.markdown(f"> {cited}")
+            else:
+                st.caption("_(no excerpt returned by NotebookLM for this citation)_")
+
+            if st.button(
+                f"🔍 View source [{n}]",
+                key=f"{key_prefix}_vs_{n}_{r.get('source_id')}",
+            ):
+                _source_dialog(
+                    {
+                        "source_id": r["source_id"],
+                        "cited_text": cited or None,
+                        "title": title,
+                        "n": n,
+                    },
+                    on_view_source,
+                )
+            st.divider()
+
+
 def render_chat(
     messages: List[dict],
     on_send: Callable[[str], str],
     on_clear: Callable,
     on_export: Callable[[str], None],
+    on_view_source: Callable[[str, str], dict],
     disabled: bool = False
 ):
     """Render the chat interface."""
@@ -171,28 +264,37 @@ def render_chat(
         if not messages:
             st.info("👋 Ask a question about your documents!")
         else:
-            for msg in messages:
+            for idx, msg in enumerate(messages):
                 with st.chat_message(msg["role"]):
                     if msg["role"] == "assistant":
                         _render_assistant_message(
                             msg["content"], msg.get("references", [])
                         )
-                        if st.button("📋 Copy", key=f"copy_{hash(msg['content'][:50])}"):
+                        _render_citations(
+                            msg.get("references", []), on_view_source, f"m{idx}"
+                        )
+                        if st.button("📋 Copy", key=f"copy_{idx}"):
                             st.toast("Copied to clipboard!")
                     else:
                         st.markdown(msg["content"])
-    
+
     # Chat input
     if prompt := st.chat_input("Ask about your documents...", disabled=disabled):
-        _handle_message(prompt, messages, on_send, chat_container)
-    
+        _handle_message(prompt, messages, on_send, on_view_source, chat_container)
+
     # Handle pending message from template
     if "pending_message" in st.session_state:
         prompt = st.session_state.pop("pending_message")
-        _handle_message(prompt, messages, on_send, chat_container)
+        _handle_message(prompt, messages, on_send, on_view_source, chat_container)
 
 
-def _handle_message(prompt: str, messages: List[dict], on_send: Callable, container):
+def _handle_message(
+    prompt: str,
+    messages: List[dict],
+    on_send: Callable,
+    on_view_source: Callable,
+    container,
+):
     """Handle sending a message and getting response."""
     
     # Add user message
@@ -218,6 +320,9 @@ def _handle_message(prompt: str, messages: List[dict], on_send: Callable, contai
                         references = []
 
                     _render_assistant_message(answer, references)
+                    _render_citations(
+                        references, on_view_source, f"live{len(messages)}"
+                    )
 
                     messages.append({
                         "role": "assistant",
