@@ -224,17 +224,17 @@ class NotebookService:
         self,
         notebook_id: str,
         references: List[dict],
-        context_chars: int = 450,
+        forward_chars: int = 900,
         max_sources: int = 15,
     ) -> List[dict]:
         """Enrich references with an extended cited chunk for hover tooltips.
 
         NotebookLM's chat API returns only a tiny excerpt per citation. This
         fetches each cited source's indexed text once and sets
-        ``ref["expanded_text"]`` to the cited passage plus surrounding
-        context, so the inline citation tooltip can show the larger chunk
-        the way NotebookLM's hover card does. Best-effort: on any failure a
-        reference simply keeps its short ``cited_text``.
+        ``ref["expanded_text"]`` to the cited passage and the text that
+        follows it (no preceding context), so the inline citation tooltip
+        shows the full quoted passage plus what comes after it. Best-effort:
+        on any failure a reference simply keeps its short ``cited_text``.
         """
         if not references:
             return references
@@ -262,14 +262,18 @@ class NotebookService:
                     ft = fulltext_cache.get(sid)
                     if ft is None:
                         continue
-                    try:
-                        matches = ft.find_citation_context(
-                            cited, context_chars=context_chars
-                        )
-                    except Exception:
-                        matches = []
-                    if matches:
-                        ref["expanded_text"] = matches[0][0].strip()
+                    content = getattr(ft, "content", "") or ""
+                    if not content:
+                        continue
+                    # Locate where the cited passage starts (the chat API
+                    # often truncates it) and take everything from there
+                    # forward only — no preceding characters.
+                    needle = cited[: min(40, len(cited))]
+                    idx = content.find(needle) if needle else -1
+                    if idx != -1:
+                        ref["expanded_text"] = content[
+                            idx : idx + forward_chars
+                        ].strip()
             return references
 
         try:
