@@ -150,6 +150,17 @@ class NotebookService:
                 result = await client.chat.ask(
                     notebook_id, question, conversation_id=conversation_id
                 )
+                # result.conversation_id comes from scraping a reverse-
+                # engineered streaming response and can be missed on newer
+                # API builds, which silently breaks follow-up continuity.
+                # Prefer the authoritative id from the dedicated RPC.
+                resolved_conv_id = result.conversation_id
+                try:
+                    server_id = await client.chat.get_conversation_id(notebook_id)
+                    if server_id:
+                        resolved_conv_id = server_id
+                except Exception:
+                    pass
                 references = [
                     {
                         "citation_number": ref.citation_number,
@@ -158,5 +169,5 @@ class NotebookService:
                     }
                     for ref in result.references
                 ]
-                return result.answer, result.conversation_id, references
+                return result.answer, resolved_conv_id, references
         return self._run_async(_ask())

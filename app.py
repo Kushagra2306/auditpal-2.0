@@ -190,13 +190,20 @@ def render_main_app(service: NotebookService, settings):
     with col2:
         # Chat callbacks
         def on_send(message):
+            sent_conv_id = st.session_state.get("current_conversation_id")
+            hist = _conversation_history(st.session_state["messages"])
             answer, conv_id, refs = service.ask(
                 st.session_state["current_notebook_id"],
                 message,
-                conversation_id=st.session_state.get("current_conversation_id"),
-                history=_conversation_history(st.session_state["messages"]),
+                conversation_id=sent_conv_id,
+                history=hist,
             )
             st.session_state["current_conversation_id"] = conv_id
+            st.session_state["_debug_last"] = {
+                "sent_conversation_id": sent_conv_id,
+                "returned_conversation_id": conv_id,
+                "history_pairs_sent": len(hist),
+            }
 
             sources_by_id = {s.id: s.title for s in st.session_state["sources"]}
             for ref in refs:
@@ -233,6 +240,14 @@ def render_main_app(service: NotebookService, settings):
             on_export=on_export,
             disabled=not has_sources
         )
+
+        with st.expander("🔧 Debug: conversation state", expanded=False):
+            st.write({
+                "current_conversation_id": st.session_state.get(
+                    "current_conversation_id"
+                ),
+                "last_request": st.session_state.get("_debug_last", "no requests yet"),
+            })
 
 
 def main():
