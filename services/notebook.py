@@ -42,11 +42,15 @@ class NotebookService:
     def is_authenticated(self) -> bool:
         """Check if NotebookLM is authenticated.
 
-        Resolve the credentials path via the library itself so this check
-        matches wherever ``notebooklm login`` actually saved them (newer
-        versions use profile-based paths like
-        ``~/.notebooklm/profiles/default/storage_state.json``).
+        Accepts the CI-style ``NOTEBOOKLM_AUTH_JSON`` env var (inline
+        credentials, no file) and otherwise resolves the credentials path
+        via the library itself so this check matches wherever
+        ``notebooklm login`` saved them (newer versions use profile-based
+        paths like ``~/.notebooklm/profiles/default/storage_state.json``).
         """
+        import os
+        if os.environ.get("NOTEBOOKLM_AUTH_JSON", "").strip():
+            return True
         try:
             from notebooklm.paths import get_storage_path
             return get_storage_path().exists()
