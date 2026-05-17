@@ -138,22 +138,35 @@ class NotebookService:
         async def _ask():
             from notebooklm import NotebookLMClient
             async with await NotebookLMClient.from_storage() as client:
-                # A fresh client is created per call, so its in-memory
-                # conversation cache is empty. NotebookLM's ask() builds the
-                # prior-turns payload solely from that cache, so reseed it
-                # from the app's transcript before continuing a conversation.
-                if conversation_id and history:
+                # NotebookLM keeps conversation memory server-side, tied to
+                # the notebook's existing conversation thread. If the app has
+                # no conversation id yet, adopt the notebook's current
+                # server-side thread instead of letting the library mint a
+                # fresh uuid (the server treats unknown ids as ephemeral and
+                # never persists those turns, so follow-ups lose context).
+                effective_conv_id = conversation_id
+                if effective_conv_id is None:
+                    try:
+                        effective_conv_id = await client.chat.get_conversation_id(
+                            notebook_id
+                        )
+                    except Exception:
+                        effective_conv_id = None
+                # Also seed the in-memory cache so the library still emits the
+                # inline prior-turns payload (harmless if the backend ignores
+                # it; helps if it does not).
+                if effective_conv_id and history:
                     for turn_number, (prev_q, prev_a) in enumerate(history, start=1):
                         client._core.cache_conversation_turn(
-                            conversation_id, prev_q, prev_a, turn_number
+                            effective_conv_id, prev_q, prev_a, turn_number
                         )
                 result = await client.chat.ask(
-                    notebook_id, question, conversation_id=conversation_id
+                    notebook_id, question, conversation_id=effective_conv_id
                 )
-                # result.conversation_id comes from scraping a reverse-
-                # engineered streaming response and can be missed on newer
-                # API builds, which silently breaks follow-up continuity.
-                # Prefer the authoritative id from the dedicated RPC.
+                # The streamed conversation id can be missed on newer API
+                # builds; prefer the authoritative id from the dedicated RPC
+                # so the next turn threads into the same server-side
+                # conversation.
                 resolved_conv_id = result.conversation_id
                 try:
                     server_id = await client.chat.get_conversation_id(notebook_id)
