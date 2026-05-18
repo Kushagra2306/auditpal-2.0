@@ -10,6 +10,19 @@ from config import PROMPT_TEMPLATES
 
 _CITATION_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
+
+def _friendly_error(exc) -> str:
+    """Map an internal exception to calm, non-technical user-facing copy."""
+    s = str(exc).lower()
+    if "rate" in s and "limit" in s:
+        return ("The shared assistant is busy right now. "
+                "Please wait a few seconds and try again.")
+    if any(k in s for k in (
+        "login", "auth", "redirect", "401", "403", "expired", "credential"
+    )):
+        return "AuditPal is temporarily unavailable. Please try again shortly."
+    return "Something went wrong handling that request. Please try again."
+
 _CITATION_CSS = """
 <style>
 .cite-marker {
@@ -333,11 +346,13 @@ def _handle_message(
                         "timestamp": datetime.now().isoformat()
                     })
                 except Exception as e:
-                    error_msg = f"❌ Error: {str(e)}"
-                    st.error(error_msg)
+                    friendly = _friendly_error(e)
+                    st.error(friendly)
+                    # Keep the literal "❌ Error:" prefix: _conversation_history
+                    # filters failed turns by it so they don't poison context.
                     messages.append({
                         "role": "assistant",
-                        "content": error_msg,
+                        "content": f"❌ Error: {friendly}",
                         "references": [],
                         "timestamp": datetime.now().isoformat()
                     })

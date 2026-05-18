@@ -18,26 +18,31 @@ class Source:
 class NotebookService:
     """Service for interacting with NotebookLM."""
     
-    def __init__(self):
-        """Initialize the service."""
-        self._loop = None
-    
-    def _get_loop(self):
-        """Get or create event loop."""
-        try:
-            self._loop = asyncio.get_event_loop()
-            if self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(self._loop)
-        except RuntimeError:
-            self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
-        return self._loop
-    
     def _run_async(self, coro):
-        """Run async coroutine synchronously."""
-        loop = self._get_loop()
-        return loop.run_until_complete(coro)
+        """Run an async coroutine on a fresh, isolated event loop.
+
+        A new loop per call avoids reusing a closed or foreign loop across
+        Streamlit reruns / ScriptRunner threads under concurrent multi-user
+        load (which otherwise surfaces as intermittent "event loop is
+        closed" / "loop already running" failures).
+        """
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            try:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
     
     def is_authenticated(self) -> bool:
         """Check if NotebookLM is authenticated.

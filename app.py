@@ -5,6 +5,8 @@ Built on NotebookLM.
 
 import streamlit as st
 from pathlib import Path
+import hashlib
+import hmac
 import sys
 
 # Add parent directory to path for imports
@@ -67,6 +69,9 @@ def init_session_state():
         "current_conversation_id": None,
         "sources": [],
         "notebooks": [],
+        "tester_id": None,
+        "assigned_notebook_id": None,
+        "authed": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -119,24 +124,118 @@ notebooklm login""", language="bash")
             st.error("Not connected yet. Please complete the login and restart Docker.")
 
 
+def require_access(settings) -> bool:
+    """Shared-password gate. Returns True when access is granted."""
+    if not settings.access_password:
+        return True
+    if st.session_state.get("authed"):
+        return True
+
+    st.markdown("# 📊 AuditPal")
+    st.markdown("#### Enter the access password to continue")
+    entered = st.text_input("Access password", type="password", key="access_pw")
+    if st.button("Enter", type="primary"):
+        if hmac.compare_digest(entered or "", settings.access_password):
+            st.session_state["authed"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False
+
+
+def render_unavailable_page():
+    """Calm message shown to testers when NotebookLM is unreachable."""
+    st.markdown("# 📊 AuditPal")
+    st.warning(
+        "AuditPal is temporarily unavailable. Please try again shortly, "
+        "or contact the administrator if it persists."
+    )
+
+
+def render_identify_page(pool: list, allow_name_fallback: bool):
+    """Pin the session to one demo notebook via the tester's workspace code."""
+    st.markdown("# 📊 AuditPal")
+    st.markdown("#### Enter your workspace code")
+    st.caption(
+        f"Use the code from your invitation email (a number between 1 and "
+        f"{len(pool)})."
+    )
+    code = st.text_input("Workspace code", key="workspace_code")
+    name = ""
+    if allow_name_fallback:
+        name = st.text_input(
+            "…or your name (only if you were not given a code)",
+            key="workspace_name",
+        )
+
+    if st.button("Start", type="primary"):
+        c = (code or "").strip()
+        if c:
+            if c.isdigit() and 1 <= int(c) <= len(pool):
+                assigned = pool[int(c) - 1]
+                tester_id = f"code:{int(c)}"
+            else:
+                st.error(
+                    f"Invalid code. Enter a number between 1 and {len(pool)}."
+                )
+                return
+        elif allow_name_fallback and name.strip():
+            idx = int(
+                hashlib.sha256(name.strip().lower().encode()).hexdigest(), 16
+            ) % len(pool)
+            assigned = pool[idx]
+            tester_id = f"name:{name.strip().lower()}"
+        else:
+            st.error("Please enter your workspace code.")
+            return
+
+        st.session_state["tester_id"] = tester_id
+        st.session_state["assigned_notebook_id"] = assigned
+        st.session_state["current_notebook_id"] = assigned
+        st.session_state["messages"] = []
+        st.session_state["current_conversation_id"] = None
+        st.session_state["sources"] = []
+        st.rerun()
+
+
 def render_main_app(service: NotebookService, settings):
     """Render the main application."""
-    # Load notebooks
-    try:
-        if not st.session_state["notebooks"]:
-            st.session_state["notebooks"] = service.list_notebooks()
-    except Exception as e:
-        st.error(f"Failed to load notebooks: {e}")
-        st.session_state["notebooks"] = []
+    pool = settings.get_demo_notebook_ids()
+    locked = settings.lock_to_demo and bool(pool)
+
+    if locked:
+        assigned = st.session_state.get("assigned_notebook_id")
+        st.session_state["current_notebook_id"] = assigned
+        st.session_state["notebooks"] = [
+            {"id": assigned, "title": "Demo workspace"}
+        ]
+        if not st.session_state["sources"]:
+            try:
+                st.session_state["sources"] = service.list_sources(assigned)
+            except Exception:
+                render_unavailable_page()
+                return
+    else:
+        # Load notebooks
+        try:
+            if not st.session_state["notebooks"]:
+                st.session_state["notebooks"] = service.list_notebooks()
+        except Exception as e:
+            st.error(f"Failed to load notebooks: {e}")
+            st.session_state["notebooks"] = []
 
     # Callbacks
     def on_notebook_select(notebook_id):
+        if locked and notebook_id != st.session_state.get("assigned_notebook_id"):
+            return  # testers are pinned to their assigned notebook
         st.session_state["current_notebook_id"] = notebook_id
         st.session_state["messages"] = []
         st.session_state["current_conversation_id"] = None
         st.session_state["sources"] = service.list_sources(notebook_id)
 
     def on_notebook_create(title):
+        if locked:
+            return
         nb = service.create_notebook(title)
         st.session_state["notebooks"].append(nb)
         on_notebook_select(nb["id"])
@@ -148,6 +247,8 @@ def render_main_app(service: NotebookService, settings):
         current_notebook_id=st.session_state["current_notebook_id"],
         on_notebook_select=on_notebook_select,
         on_notebook_create=on_notebook_create,
+        locked=locked,
+        feedback_url=settings.feedback_form_url,
     )
 
     # Main content
@@ -184,7 +285,8 @@ def render_main_app(service: NotebookService, settings):
             on_add_url=on_add_url,
             on_add_file=on_add_file,
             on_delete=on_delete_source,
-            supported_extensions=settings.supported_extensions
+            supported_extensions=settings.supported_extensions,
+            allow_modify=not locked
         )
 
     with col2:
@@ -258,6 +360,13 @@ def render_main_app(service: NotebookService, settings):
 
         with st.expander("🔧 Debug: conversation state", expanded=False):
             st.write({
+                "tester_id": st.session_state.get("tester_id"),
+                "assigned_notebook_id": st.session_state.get(
+                    "assigned_notebook_id"
+                ),
+                "current_notebook_id": st.session_state.get(
+                    "current_notebook_id"
+                ),
                 "current_conversation_id": st.session_state.get(
                     "current_conversation_id"
                 ),
@@ -273,11 +382,27 @@ def main():
     # Initialize NotebookLM service (single account for all users)
     service = NotebookService()
 
+    # Shared-password gate (market-test mode)
+    if not require_access(settings):
+        return
+
+    pool = settings.get_demo_notebook_ids()
+    locked = settings.lock_to_demo and bool(pool)
+
     # Check if NotebookLM is authenticated
     if not service.is_authenticated():
-        render_setup_page(service)
-    else:
-        render_main_app(service, settings)
+        if locked:
+            render_unavailable_page()      # testers never see admin setup
+        else:
+            render_setup_page(service)
+        return
+
+    # Pin each tester to their assigned demo notebook before the app loads
+    if locked and not st.session_state.get("assigned_notebook_id"):
+        render_identify_page(pool, settings.allow_name_fallback)
+        return
+
+    render_main_app(service, settings)
 
 
 if __name__ == "__main__":

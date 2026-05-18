@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 50
     supported_extensions: list = [".pdf", ".txt", ".md", ".docx", ".xlsx", ".csv"]
 
+    # Market-test rollout (set via env vars / Streamlit Cloud secrets)
+    access_password: str = ""          # ACCESS_PASSWORD: shared gate; empty = no gate
+    demo_notebook_ids: str = ""        # DEMO_NOTEBOOK_IDS: comma-separated pool ids
+    feedback_form_url: str = ""        # FEEDBACK_FORM_URL: external feedback link
+    lock_to_demo: bool = True          # LOCK_TO_DEMO: false = unlocked owner mode
+    allow_name_fallback: bool = False  # ALLOW_NAME_FALLBACK: hash-by-name (may collide)
+
+    def get_demo_notebook_ids(self) -> list:
+        """Parse demo_notebook_ids into an ordered list of non-empty ids."""
+        return [x.strip() for x in (self.demo_notebook_ids or "").split(",") if x.strip()]
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

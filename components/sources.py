@@ -13,13 +13,25 @@ def render_sources(
     on_add_url: Callable,
     on_add_file: Callable,
     on_delete: Callable,
-    supported_extensions: List[str]
+    supported_extensions: List[str],
+    allow_modify: bool = True
 ):
-    """Render the source management interface."""
-    
+    """Render the source management interface.
+
+    When ``allow_modify`` is False (market-test lock) the upload/URL tabs
+    and per-source delete are hidden — the source list is read-only.
+    """
+
     st.markdown("## 📁 Sources")
-    st.caption("Add documents and URLs to analyze")
-    
+    st.caption(
+        "Documents in this workspace" if not allow_modify
+        else "Add documents and URLs to analyze"
+    )
+
+    if not allow_modify:
+        _render_source_list(sources, on_delete, allow_modify=False)
+        return
+
     # Add sources section
     tab1, tab2 = st.tabs(["📤 Upload Files", "🔗 Add URL"])
     
@@ -85,14 +97,19 @@ def render_sources(
                         st.error(f"❌ Failed: {e}")
     
     st.divider()
-    
-    # Current sources list
+    _render_source_list(sources, on_delete, allow_modify=True)
+
+
+def _render_source_list(sources: List, on_delete: Callable, allow_modify: bool):
+    """Render the grouped source list (read-only when allow_modify=False)."""
     st.markdown("### 📚 Current Sources")
-    
+
     if not sources:
-        st.info("No sources added yet. Upload files or add URLs above.")
+        msg = ("No sources in this workspace yet." if not allow_modify
+               else "No sources added yet. Upload files or add URLs above.")
+        st.info(msg)
         return
-    
+
     # Group by category
     categorized = {}
     for source in sources:
@@ -100,15 +117,19 @@ def render_sources(
         if cat not in categorized:
             categorized[cat] = []
         categorized[cat].append(source)
-    
+
     for cat_key, cat_sources in categorized.items():
         cat_info = DOCUMENT_CATEGORIES.get(cat_key, DOCUMENT_CATEGORIES['other'])
-        
+
         with st.expander(
             f"{cat_info['icon']} {cat_info['name']} ({len(cat_sources)})",
             expanded=True
         ):
             for source in cat_sources:
+                if not allow_modify:
+                    st.markdown(f"📄 **{source.title}**")
+                    st.caption(f"Type: {source.source_type}")
+                    continue
                 col1, col2 = st.columns([4, 1])
                 with col1:
                     st.markdown(f"📄 **{source.title}**")
