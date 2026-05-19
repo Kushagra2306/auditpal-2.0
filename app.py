@@ -5,14 +5,13 @@ Built on NotebookLM.
 
 import streamlit as st
 from pathlib import Path
-import hashlib
 import hmac
 import sys
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import get_settings
+from config import get_settings, resolve_pool_assignment
 from services.notebook import NotebookService
 from components.sidebar import render_sidebar
 from components.sources import render_sources
@@ -169,24 +168,11 @@ def render_identify_page(pool: list, allow_name_fallback: bool):
         )
 
     if st.button("Start", type="primary"):
-        c = (code or "").strip()
-        if c:
-            if c.isdigit() and 1 <= int(c) <= len(pool):
-                assigned = pool[int(c) - 1]
-                tester_id = f"code:{int(c)}"
-            else:
-                st.error(
-                    f"Invalid code. Enter a number between 1 and {len(pool)}."
-                )
-                return
-        elif allow_name_fallback and name.strip():
-            idx = int(
-                hashlib.sha256(name.strip().lower().encode()).hexdigest(), 16
-            ) % len(pool)
-            assigned = pool[idx]
-            tester_id = f"name:{name.strip().lower()}"
-        else:
-            st.error("Please enter your workspace code.")
+        assigned, tester_id, error = resolve_pool_assignment(
+            pool, code, name, allow_name_fallback
+        )
+        if error:
+            st.error(error)
             return
 
         st.session_state["tester_id"] = tester_id

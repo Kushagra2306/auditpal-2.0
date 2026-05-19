@@ -1,5 +1,6 @@
 """AuditPal Configuration"""
 
+import hashlib
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
@@ -108,6 +109,36 @@ PROMPT_TEMPLATES = {
         "category": "Analysis"
     }
 }
+
+
+def resolve_pool_assignment(
+    pool: list,
+    code: str,
+    name: str = "",
+    allow_name_fallback: bool = False,
+) -> tuple:
+    """Map a tester's workspace code (or name) to one demo notebook.
+
+    Pure access-policy logic shared by the identify page and the test
+    harness. Returns ``(assigned_id, tester_id, error)``; on success
+    ``error`` is None, otherwise ``assigned_id``/``tester_id`` are None
+    and ``error`` is the user-facing message.
+    """
+    if not pool:
+        return (None, None, "No demo workspaces are configured.")
+
+    c = (code or "").strip()
+    if c:
+        if c.isdigit() and 1 <= int(c) <= len(pool):
+            return (pool[int(c) - 1], f"code:{int(c)}", None)
+        return (None, None, f"Invalid code. Enter a number between 1 and {len(pool)}.")
+
+    if allow_name_fallback and name.strip():
+        key = name.strip().lower()
+        idx = int(hashlib.sha256(key.encode()).hexdigest(), 16) % len(pool)
+        return (pool[idx], f"name:{key}", None)
+
+    return (None, None, "Please enter your workspace code.")
 
 
 def get_settings() -> Settings:
