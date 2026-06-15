@@ -24,9 +24,6 @@ COPY components/ ./components/
 COPY services/ ./services/
 COPY utils/ ./utils/
 
-# Copy credentials if they exist
-COPY credentials/ /root/.notebooklm/
-
 # Create directories
 RUN mkdir -p /app/data /root/.notebooklm
 
