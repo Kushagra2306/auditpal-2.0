@@ -1,5 +1,7 @@
 """Sidebar component for AuditPal."""
 
+import os
+import hmac
 import streamlit as st
 from typing import Optional, List
 
@@ -11,6 +13,7 @@ def render_sidebar(
     on_notebook_create,
     locked: bool = False,
     feedback_url: str = "",
+    admin_password: str = "",
 ):
     """Render the sidebar with notebook selection.
 
@@ -86,6 +89,10 @@ def render_sidebar(
             - Export answers for your records
             """)
 
+        # Admin re-auth panel (hidden behind ADMIN_PASSWORD)
+        if admin_password:
+            _render_admin_panel(admin_password)
+
         # Footer
         st.divider()
         if feedback_url:
@@ -94,3 +101,60 @@ def render_sidebar(
             )
         st.caption("AuditPal v0.1.0")
         st.caption("Powered by NotebookLM")
+
+
+def _render_admin_panel(admin_password: str) -> None:
+    """Collapsible admin panel for refreshing the NotebookLM session in-place.
+
+    Requires the admin to enter ADMIN_PASSWORD first. Once unlocked, they
+    paste fresh auth JSON (obtained by running `notebooklm login` locally
+    and copying their storage_state.json) and the app writes it to the
+    credential path so the next service call picks it up without a restart.
+    """
+    st.divider()
+    with st.expander("🔧 Admin"):
+        if not st.session_state.get("_admin_authed"):
+            pw = st.text_input("Admin password", type="password", key="_admin_pw")
+            if st.button("Unlock", key="_admin_unlock"):
+                if hmac.compare_digest(pw or "", admin_password):
+                    st.session_state["_admin_authed"] = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
+            return
+
+        st.markdown("**Refresh NotebookLM session**")
+        st.caption(
+            "Run `notebooklm login` on your local machine, then copy the contents "
+            "of `~/.notebooklm/storage_state.json` and paste below."
+        )
+        new_json = st.text_area("Auth JSON", height=120, key="_admin_auth_json",
+                                placeholder='{"cookies": [...], ...}')
+        if st.button("Apply", type="primary", key="_admin_apply", disabled=not new_json.strip()):
+            try:
+                import json as _json
+                _json.loads(new_json)  # validate before writing
+                _write_auth_json(new_json.strip())
+                st.success("Session updated. The next request will use the new credentials.")
+            except Exception as exc:
+                st.error(f"Failed: {exc}")
+
+
+def _write_auth_json(json_str: str) -> None:
+    """Write fresh auth JSON to the path the notebooklm library reads."""
+    # Prefer updating NOTEBOOKLM_AUTH_JSON in the process environment so it
+    # takes effect immediately without a file-system write (works for the
+    # current process and all new Streamlit script threads).
+    os.environ["NOTEBOOKLM_AUTH_JSON"] = json_str
+
+    # Also persist to the on-disk storage path so the keepalive thread and
+    # any subprocess pick it up after a restart.
+    try:
+        from notebooklm.paths import get_storage_path
+        storage_path = get_storage_path()
+    except Exception:
+        from pathlib import Path
+        storage_path = Path.home() / ".notebooklm" / "storage_state.json"
+
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    storage_path.write_text(json_str, encoding="utf-8")

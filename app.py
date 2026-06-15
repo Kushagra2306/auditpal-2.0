@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import get_settings, resolve_pool_assignment
 from services.notebook import NotebookService
+from services.keepalive import start_keepalive
 from components.sidebar import render_sidebar
 from components.sources import render_sources
 from components.chat import render_chat
@@ -235,6 +236,7 @@ def render_main_app(service: NotebookService, settings):
         on_notebook_create=on_notebook_create,
         locked=locked,
         feedback_url=settings.feedback_form_url,
+        admin_password=settings.admin_password,
     )
 
     # Main content
@@ -364,6 +366,7 @@ def main():
     """Main application entry point."""
     init_session_state()
     settings = get_settings()
+    start_keepalive()
 
     # Initialize NotebookLM service (single account for all users)
     service = NotebookService()

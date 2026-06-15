@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     feedback_form_url: str = ""        # FEEDBACK_FORM_URL: external feedback link
     lock_to_demo: bool = True          # LOCK_TO_DEMO: false = unlocked owner mode
     allow_name_fallback: bool = False  # ALLOW_NAME_FALLBACK: hash-by-name (may collide)
+    admin_password: str = ""           # ADMIN_PASSWORD: unlocks in-app re-auth panel
 
     def get_demo_notebook_ids(self) -> list:
         """Parse demo_notebook_ids into an ordered list of non-empty ids."""
