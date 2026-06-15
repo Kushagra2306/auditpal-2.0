@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import get_settings, resolve_pool_assignment
 from services.notebook import NotebookService
 from services.keepalive import start_keepalive
-from components.sidebar import render_sidebar
+from components.sidebar import render_sidebar, render_admin_panel
 from components.sources import render_sources
 from components.chat import render_chat
 from utils.export import export_to_markdown, export_to_pdf, get_download_filename
@@ -78,7 +78,7 @@ def init_session_state():
             st.session_state[key] = value
 
 
-def render_setup_page(service: NotebookService):
+def render_setup_page(service: NotebookService, settings=None):
     """Render the NotebookLM setup page."""
     st.markdown("# 📊 AuditPal")
     st.markdown("### Your AI-powered accounting document assistant")
@@ -122,6 +122,12 @@ notebooklm login""", language="bash")
             st.rerun()
         else:
             st.error("Not connected yet. Please complete the login and restart Docker.")
+
+    # In-app re-auth: paste fresh credentials without rebuilding Docker.
+    if settings and settings.admin_password:
+        st.markdown("---")
+        st.markdown("### 🔑 Or connect from here (no restart needed)")
+        render_admin_panel(settings.admin_password, expanded=True)
 
 
 def require_access(settings) -> bool:
@@ -382,8 +388,11 @@ def main():
     if not service.is_authenticated():
         if locked:
             render_unavailable_page()      # testers never see admin setup
+            # Admins can still re-auth from the locked "unavailable" screen.
+            if settings.admin_password:
+                render_admin_panel(settings.admin_password, expanded=False)
         else:
-            render_setup_page(service)
+            render_setup_page(service, settings)
         return
 
     # Pin each tester to their assigned demo notebook before the app loads

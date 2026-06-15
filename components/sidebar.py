@@ -91,7 +91,7 @@ def render_sidebar(
 
         # Admin re-auth panel (hidden behind ADMIN_PASSWORD)
         if admin_password:
-            _render_admin_panel(admin_password)
+            render_admin_panel(admin_password)
 
         # Footer
         st.divider()
@@ -103,16 +103,19 @@ def render_sidebar(
         st.caption("Powered by NotebookLM")
 
 
-def _render_admin_panel(admin_password: str) -> None:
+def render_admin_panel(admin_password: str, expanded: bool = False) -> None:
     """Collapsible admin panel for refreshing the NotebookLM session in-place.
 
     Requires the admin to enter ADMIN_PASSWORD first. Once unlocked, they
     paste fresh auth JSON (obtained by running `notebooklm login` locally
     and copying their storage_state.json) and the app writes it to the
     credential path so the next service call picks it up without a restart.
+
+    Usable both from the sidebar (when authenticated) and from the setup
+    page (when *not* yet authenticated — the only place re-auth is needed).
     """
     st.divider()
-    with st.expander("🔧 Admin"):
+    with st.expander("🔧 Admin: connect / refresh NotebookLM", expanded=expanded):
         if not st.session_state.get("_admin_authed"):
             pw = st.text_input("Admin password", type="password", key="_admin_pw")
             if st.button("Unlock", key="_admin_unlock"):
@@ -135,7 +138,8 @@ def _render_admin_panel(admin_password: str) -> None:
                 import json as _json
                 _json.loads(new_json)  # validate before writing
                 _write_auth_json(new_json.strip())
-                st.success("Session updated. The next request will use the new credentials.")
+                st.success("Session updated — reconnecting…")
+                st.rerun()
             except Exception as exc:
                 st.error(f"Failed: {exc}")
 
